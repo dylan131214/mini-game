@@ -2943,7 +2943,7 @@ function handleClick(mx, my) {
       sndMenuClick();
     }
     // 쉬움 모드 토글
-    const bx = 490, by = cy + ch + 22, bw = 300, bh = 44;
+    const bx = 490, by = cy + cardH + 22, bw = 300, bh = 44;
     if (mx > bx && mx < bx+bw && amy > by && amy < by+bh) {
       easyMode = !easyMode;
       if (easyMode) hardMode = false;
