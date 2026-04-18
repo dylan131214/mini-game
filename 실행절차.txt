@@ -1,0 +1,10 @@
+1. 검색에서 terminal을 실행하고 게임 개발 경로로 이동 
+	- 명령어 실행 : d:\
+	- 명령어 실행 : cd d:\mini-game\경로 ( 예 : cd d:\mini-game\dino-game)
+	- 명령어 실행 : claude
+
+
+
+git add .
+git commit -m "수정 내용 간단히 설명"
+git push
