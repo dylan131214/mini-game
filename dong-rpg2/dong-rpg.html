@@ -2687,7 +2687,7 @@ function damagePlayer() {
   if (player.invincible > 100) return;
   player.hp--;
   player.hitFlash = 20;
-  player.invincible = 60;
+  player.invincible = 90;
   screenFlash = { color: '#f00', alpha: 0.5 };
   spawnParticles(player.x + 20, player.y + 20, '#f44', 12, 4, 20);
   sndPlayerHit();
