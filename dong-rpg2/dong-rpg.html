@@ -56,6 +56,84 @@ canvas.addEventListener('mouseup', e => {
   if (e.button === 2) mouse.right = false;
 });
 canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+// ── 모바일 가상 버튼 ──
+const VBTNS = {
+  left:   { x: 30,   y: 600, w: 80, h: 80, label: '◀' },
+  right:  { x: 140,  y: 600, w: 80, h: 80, label: '▶' },
+  jump:   { x: 85,   y: 505, w: 80, h: 80, label: '▲' },
+  attack: { x: 1090, y: 575, w: 100,h: 100,label: '⚔' },
+  parry:  { x: 1200, y: 470, w: 80, h: 80, label: '🛡' },
+};
+const vBtn = { left:false, right:false, jump:false, attack:false, parry:false };
+let hasTouched = false;
+
+function touchToCanvas(t) {
+  const r = canvas.getBoundingClientRect();
+  return { x:(t.clientX-r.left)*1280/r.width, y:(t.clientY-r.top)*720/r.height };
+}
+function hitBtn(pos, btn) {
+  return pos.x>=btn.x && pos.x<=btn.x+btn.w && pos.y>=btn.y && pos.y<=btn.y+btn.h;
+}
+function applyTouches(e) {
+  e.preventDefault();
+  hasTouched = true;
+  const prev = { attack: vBtn.attack, parry: vBtn.parry };
+  Object.keys(vBtn).forEach(k => vBtn[k] = false);
+  for (const t of e.touches) {
+    const p = touchToCanvas(t);
+    for (const [k, b] of Object.entries(VBTNS)) { if (hitBtn(p, b)) vBtn[k] = true; }
+    // 메뉴/UI 클릭: 전체 화면 터치를 왼쪽 클릭으로 처리
+    if (!Object.values(VBTNS).some(b => hitBtn(p, b))) {
+      mouse.x = p.x; mouse.y = p.y;
+    }
+  }
+  if (vBtn.attack && !prev.attack) mouse.leftJustPressed = true;
+  if (vBtn.parry  && !prev.parry)  mouse.rightJustPressed = true;
+}
+function applyTouchEnd(e) {
+  e.preventDefault();
+  hasTouched = true;
+  const prev = { attack: vBtn.attack, parry: vBtn.parry };
+  Object.keys(vBtn).forEach(k => vBtn[k] = false);
+  for (const t of e.touches) {
+    const p = touchToCanvas(t);
+    for (const [k, b] of Object.entries(VBTNS)) { if (hitBtn(p, b)) vBtn[k] = true; }
+  }
+  // 터치 종료 시 UI 클릭 처리
+  if (e.changedTouches.length > 0) {
+    const p = touchToCanvas(e.changedTouches[0]);
+    const onBtn = Object.values(VBTNS).some(b => hitBtn(p, b));
+    if (!onBtn) { mouse.x = p.x; mouse.y = p.y; mouse.leftJustPressed = true; }
+  }
+}
+canvas.addEventListener('touchstart',  applyTouches,  { passive:false });
+canvas.addEventListener('touchmove',   applyTouches,  { passive:false });
+canvas.addEventListener('touchend',    applyTouchEnd, { passive:false });
+canvas.addEventListener('touchcancel', applyTouchEnd, { passive:false });
+
+function drawVirtualButtons() {
+  if (!hasTouched) return;
+  ctx.save();
+  for (const [k, b] of Object.entries(VBTNS)) {
+    const active = vBtn[k];
+    ctx.globalAlpha = active ? 0.75 : 0.35;
+    ctx.fillStyle = active ? 'rgba(255,220,80,0.5)' : 'rgba(60,60,60,0.6)';
+    ctx.strokeStyle = active ? '#ffe050' : '#888';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(b.x, b.y, b.w, b.h, 14);
+    ctx.fill(); ctx.stroke();
+    ctx.globalAlpha = active ? 1 : 0.55;
+    ctx.fillStyle = '#fff';
+    ctx.font = '28px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(b.label, b.x + b.w/2, b.y + b.h/2);
+  }
+  ctx.textBaseline = 'alphabetic';
+  ctx.restore();
+}
 canvas.addEventListener('wheel', e => {
   if (state === STATE.BOSS_SELECT) {
     bossSelectScroll = Math.max(0, Math.min(BOSS_SELECT_MAX_SCROLL, bossSelectScroll + e.deltaY * 0.4));
@@ -544,8 +622,8 @@ function resetBattle() {
   player.arrows = [];
   player.dashDur = 0; player.dashCd = 0; player.dashAttacking = false;
   if (selectedBoss === 'dragon') {
-    boss.w = 90; boss.h = 100;
-    boss.x = ARENA_RIGHT - 110; boss.y = FLOOR_Y - 100;
+    boss.w = 315; boss.h = 350;
+    boss.x = ARENA_RIGHT - 335; boss.y = FLOOR_Y - 350;
     boss.maxHp = easyMode ? 28 : 40;
   } else {
     boss.w = 60; boss.h = 84;
@@ -557,9 +635,16 @@ function resetBattle() {
   boss.pattern = 'idle'; boss.patternTimer = selectedBoss === 'dragon' ? 120 : 180; boss.phase = 0; boss.phaseTimer = 0;
   boss.attackBox = null; boss.shockwaves = []; boss.axeProjectiles = []; boss.laserProjectiles = [];
   boss.dragonFireballs = []; boss.biteBoxes = []; boss.biteTargetX = 0; boss.biteStep = 0;
-  boss.chargeTarget = 0; boss.charging = false; boss.dead = false;
+  boss.chargeTarget = 0; boss.charging = false; boss.dead = false; boss.vulnerable = 0;
   boss.animFrame = 0; boss.animTimer = 0; boss.deathAnim = 0;
   boss.phase2Active = false; boss.phase2State = 'none'; boss.phase2Timer = 0; boss.isPhase2 = false;
+  boss.dragon2Active = false; boss.dragon2State = 'none'; boss.dragon2Timer = 0;
+  boss.dragon2WhiteP = 0; boss.dragon2GrowP = 0;
+  boss.d2Pattern = 'idle'; boss.d2PatternTimer = 9999;
+  boss.d2PillarCount = 0; boss.d2PillarNextTimer = 0;
+  boss.d2LaserCount = 0; boss.d2LaserNextTimer = 0;
+  boss.d2LaserWarning = null; boss.d2LaserBeams = []; boss.d2FirePillars = [];
+  boss.lungeData = null;
   particles = [];
   screenFlash = { color: '', alpha: 0 };
   screenShake = { power: 0, dur: 0 };
@@ -887,6 +972,7 @@ function drawLaser(l) {
 function drawDragon(x, y, hitFlash, pattern, animFrame, phaseTimer, biteStep) {
   ctx.save();
   ctx.translate(x, y);
+  ctx.scale(3.5, 3.5);
   const breathe = Math.sin(animFrame * 0.12) * 2;
   const hc = hitFlash > 0;
 
@@ -1013,21 +1099,22 @@ function drawBiteWarning(biteTargetX, biteStep, phaseTimer, phase) {
   if (phase !== 0) return;
   const alpha = Math.min(0.7, (50 - phaseTimer) / 30 + 0.2);
   ctx.fillStyle = `rgba(255,50,0,${alpha * 0.35})`;
-  ctx.fillRect(biteTargetX - 30, FLOOR_Y - 110, 60, 110);
+  ctx.fillRect(biteTargetX - 160, FLOOR_Y - 550, 320, 550);
   ctx.fillStyle = `rgba(255,100,0,${alpha * 0.6})`;
-  ctx.fillRect(biteTargetX - 4, FLOOR_Y - 110, 8, 110);
+  ctx.fillRect(biteTargetX - 4, FLOOR_Y - 550, 8, 550);
   // 경고 표시
   ctx.font = pixelFont(28);
   ctx.textAlign = 'center';
   ctx.fillStyle = `rgba(255,${Math.floor(200-alpha*100)},0,${alpha})`;
-  ctx.fillText('!', biteTargetX, FLOOR_Y - 118);
+  ctx.fillText('!', biteTargetX, FLOOR_Y - 558);
   ctx.textAlign = 'left';
 }
 
 // 지면 강타 경고 (맵 전체 강조)
 function drawSlamWarning(phaseTimer) {
-  const prog = Math.min(1, (120 - phaseTimer) / 90);
+  const prog = Math.min(1, Math.max(0, (120 - phaseTimer) / 90));
   const alpha = Math.min(0.6, prog * 0.8);
+  if (alpha <= 0) return;
   // 바닥 전체 붉게
   ctx.fillStyle = `rgba(255,50,0,${alpha * 0.3})`;
   ctx.fillRect(ARENA_LEFT, FLOOR_Y - 130, ARENA_RIGHT - ARENA_LEFT, 130);
@@ -1170,7 +1257,15 @@ function drawHUD() {
     ctx.font = pixelFont(13);
     ctx.fillStyle = selectedBoss === 'dragon' ? '#e03030' : (boss.isPhase2 ? '#f44' : '#DAA520');
     ctx.textAlign = 'center';
-    ctx.fillText(selectedBoss === 'dragon' ? '붉은 비룡' : (boss.isPhase2 ? '흑화 도끼왕  [2페이즈]' : '황금 기사 도끼왕'), 640, barY + barH + 16);
+    ctx.fillText(selectedBoss === 'dragon' ? (boss.dragon2Active ? '붉은 비룡  [세 개의 머리]' : '붉은 비룡') : (boss.isPhase2 ? '흑화 도끼왕  [2페이즈]' : '황금 기사 도끼왕'), 640, barY + barH + 16);
+    if (boss.vulnerable > 0) {
+      const vRatio = boss.vulnerable / 600;
+      ctx.fillStyle = `rgba(255,220,50,${0.6 + 0.4 * Math.sin(Date.now() * 0.01)})`;
+      ctx.fillRect(barX, barY + barH + 20, barW * vRatio, 4);
+      ctx.font = pixelFont(11);
+      ctx.fillStyle = '#ff0';
+      ctx.fillText('▶ 공격 가능!', 640, barY + barH + 34);
+    }
     ctx.textAlign = 'left';
   } else if (boss.phase2Active) {
     // 변신 중 메시지
@@ -1390,40 +1485,37 @@ function drawBossSelect() {
   }
 
   // ── 보스 카드 2: 붉은 비룡 ──
-  const locked = hardMode;
-  const hov2 = !locked && mouse.x > cx2 && mouse.x < cx2+cardW && amy > cy && amy < cy+cardH;
+  const hov2 = mouse.x > cx2 && mouse.x < cx2+cardW && amy > cy && amy < cy+cardH;
   const sel2 = selectedBoss === 'dragon';
-  ctx.fillStyle = locked ? '#0a0a0a' : (hov2 || sel2 ? '#140a00' : '#111');
+  ctx.fillStyle = hov2 || sel2 ? '#140a00' : '#111';
   ctx.fillRect(cx2, cy, cardW, cardH);
-  ctx.strokeStyle = locked ? '#333' : (sel2 ? '#c02020' : (hov2 ? '#882010' : '#444'));
+  ctx.strokeStyle = sel2 ? '#c02020' : (hov2 ? '#882010' : '#444');
   ctx.lineWidth = sel2 ? 4 : 2;
   ctx.strokeRect(cx2, cy, cardW, cardH);
   if (sel2) { ctx.fillStyle = 'rgba(180,20,20,0.08)'; ctx.fillRect(cx2,cy,cardW,cardH); }
 
   ctx.save();
-  if (locked) ctx.globalAlpha = 0.3;
-  ctx.translate(cx2 + cardW/2 - 10, cy + 55); ctx.scale(1.1, 1.1);
+  ctx.translate(cx2 + 140, cy + 74); ctx.scale(0.35, 0.35);
   drawDragon(0, 0, 0, 'idle', 0, 999, 0);
   ctx.restore();
   ctx.globalAlpha = 1;
 
-  if (locked) {
-    ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(cx2, cy, cardW, cardH);
-    ctx.font = pixelFont(18); ctx.fillStyle = '#555'; ctx.textAlign = 'center';
-    ctx.fillText('어려움 모드 비호환', cx2 + cardW/2, cy + cardH/2 - 10);
-    ctx.font = pixelFont(12); ctx.fillStyle = '#444';
-    ctx.fillText('어려움 모드 OFF 시 선택 가능', cx2 + cardW/2, cy + cardH/2 + 16);
-  } else {
-    ctx.font = pixelFont(18); ctx.fillStyle = '#c03030'; ctx.textAlign = 'center';
-    ctx.fillText('붉은 비룡', cx2 + cardW/2, cy + 292);
-    ctx.font = pixelFont(12); ctx.fillStyle = '#aaa';
-    ctx.fillText('불덩어리 · 지면 폭발 · 엇박자 물기', cx2 + cardW/2, cy + 316);
+  ctx.font = pixelFont(18); ctx.fillStyle = '#c03030'; ctx.textAlign = 'center';
+  ctx.fillText('붉은 비룡', cx2 + cardW/2, cy + 280);
+  ctx.font = pixelFont(12); ctx.fillStyle = '#aaa';
+  ctx.fillText('불덩어리 · 지면 폭발 · 엇박자 물기', cx2 + cardW/2, cy + 304);
+  if (hardMode) {
+    ctx.fillStyle = '#ff8844';
+    ctx.fillText('+ 세 개의 머리 [2페이즈]', cx2 + cardW/2, cy + 322);
     ctx.fillStyle = '#f88';
-    ctx.fillText('HP: 40  위험도: ★★★★★', cx2 + cardW/2, cy + 338);
-    if (hov2 || sel2) {
-      ctx.font = pixelFont(14); ctx.fillStyle = sel2 ? '#c03030' : '#ff8';
-      ctx.fillText(sel2 ? '▶ 선택됨' : '[ 클릭하여 선택 ]', cx2 + cardW/2, cy + 364);
-    }
+    ctx.fillText('HP: 40+30  위험도: ★★★★★', cx2 + cardW/2, cy + 340);
+  } else {
+    ctx.fillStyle = '#f88';
+    ctx.fillText('HP: 40  위험도: ★★★★★', cx2 + cardW/2, cy + 322);
+  }
+  if (hov2 || sel2) {
+    ctx.font = pixelFont(14); ctx.fillStyle = sel2 ? '#c03030' : '#ff8';
+    ctx.fillText(sel2 ? '▶ 선택됨' : '[ 클릭하여 선택 ]', cx2 + cardW/2, cy + 364);
   }
   bossSelectHover.hover = hov1 || hov2;
 
@@ -1784,12 +1876,26 @@ function updateBattle(dt) {
 
   if (player.hp <= 0 && !player.dead) {
     player.dead = true;
+    player.invincible = 0;
     spawnParticles(player.x+20, player.y+28, '#f44', 20, 5, 40);
     stopBGM(0.8);
     setTimeout(() => { state = STATE.GAMEOVER; sndGameOver(); }, 800);
   }
   if (boss.hp <= 0 && !boss.dead && !boss.phase2Active) {
-    if (hardMode && !boss.isPhase2 && selectedBoss !== 'dragon') {
+    if (selectedBoss === 'dragon' && hardMode && !boss.dragon2Active) {
+      boss.dragon2Active = true;
+      boss.dragon2State = 'transform';
+      boss.dragon2Timer = 0;
+      boss.dragon2WhiteP = 0; boss.dragon2GrowP = 0;
+      boss.hp = 1; boss.stagger = 0;
+      boss.pattern = 'idle'; boss.patternTimer = 99999;
+      boss.attackBox = null; boss.dragonFireballs = []; boss.biteBoxes = [];
+      screenFlash = { color: '#f00', alpha: 0.85 };
+      screenShake = { power: 28, dur: 40 };
+      spawnParticles(boss.x - 20, boss.y + 50, '#f00', 30, 8, 40);
+      spawnParticles(boss.x - 20, boss.y + 50, '#800', 20, 5, 30);
+      sndDragonRoar();
+    } else if (hardMode && !boss.isPhase2 && selectedBoss !== 'dragon') {
       boss.phase2Active = true;
       boss.phase2State = 'moving';
       boss.phase2Timer = 0;
@@ -1833,12 +1939,12 @@ function updatePlayer(dt) {
     if (player.dashDur % 3 === 0) {
       spawnParticles(player.x + 20, player.y + 28, '#88f', 3, 1, 8);
     }
-  } else if (keys['ArrowLeft'] || keys['KeyA']) { player.vx = -player.speed; player.facing = -1; moving = true; }
-  else if (keys['ArrowRight'] || keys['KeyD']) { player.vx = player.speed; player.facing = 1; moving = true; }
+  } else if (keys['ArrowLeft'] || keys['KeyA'] || vBtn.left) { player.vx = -player.speed; player.facing = -1; moving = true; }
+  else if (keys['ArrowRight'] || keys['KeyD'] || vBtn.right) { player.vx = player.speed; player.facing = 1; moving = true; }
   else player.vx *= 0.7;
 
   // 점프
-  if ((keys['ArrowUp'] || keys['KeyW'] || keys['Space']) && player.onGround) {
+  if ((keys['ArrowUp'] || keys['KeyW'] || keys['Space'] || vBtn.jump) && player.onGround) {
     player.vy = player.jumpPower;
     player.onGround = false;
     sndJump();
@@ -1962,6 +2068,7 @@ function updatePlayer(dt) {
 }
 
 function updateBoss(dt) {
+  if (boss.vulnerable > 0) boss.vulnerable--;
   if (selectedBoss === 'dragon') { updateDragonBoss(dt); return; }
   if (boss.phase2Active) { updatePhase2Transition(); return; }
   if (boss.stagger > 0) { boss.stagger--; return; }
@@ -2237,17 +2344,18 @@ function endBossPattern(nextTimer) {
 // ══════════════════════════════════════════
 //  드래곤 보스 AI
 // ══════════════════════════════════════════
-const BITE_WARN_TIMES = [50, 38, 62, 32];
-const BITE_GAPS      = [55, 30, 68, 28];
+const BITE_WARN_TIMES = [35, 26, 44, 22];
+const BITE_GAPS      = [38, 20, 48, 18];
 
 function updateDragonBoss(dt) {
+  if (boss.dragon2Active) { updateDragonP2(); return; }
   if (boss.stagger > 0) { boss.stagger--; return; }
   boss.animTimer++;
   if (boss.animTimer > 12) { boss.animTimer = 0; boss.animFrame++; }
 
   // 드래곤은 오른쪽 끝에 고정 (죽지 않은 한 이동 없음)
-  boss.x = ARENA_RIGHT - 110;
-  boss.y = FLOOR_Y - 100;
+  boss.x = ARENA_RIGHT - 335;
+  boss.y = FLOOR_Y - 350;
   boss.facing = -1;
 
   if (boss.hitFlash > 0) boss.hitFlash--;
@@ -2264,16 +2372,15 @@ function updateDragonBoss(dt) {
   if (boss.pattern === 'dragon_fireball_windup') {
     boss.phaseTimer--;
     if (boss.phaseTimer % 7 === 0) {
-      spawnParticles(boss.x - 20, boss.y + 38, '#f80', 5, 3, 16);
-      spawnParticles(boss.x - 20, boss.y + 38, '#f40', 3, 2, 12);
+      spawnParticles(boss.x - 180, boss.y + 100, '#f80', 5, 3, 16);
+      spawnParticles(boss.x - 180, boss.y + 100, '#f40', 3, 2, 12);
     }
     if (boss.phaseTimer <= 0) {
-      const count = easyMode ? 1 : 2;
-      for (let k = 0; k < count; k++) {
+      for (let k = 0; k < 5; k++) {
         boss.dragonFireballs.push({
-          x: boss.x - 18, y: boss.y + 38 + k * 14,
-          vx: -9 + k * 0.5, vy: -1.5 + k * 0.8,
-          bounces: 0, maxBounces: 3, r: 14, life: 700, rot: 0
+          x: boss.x - 180, y: boss.y + 100 + k * 16,
+          vx: -9 + k * 0.5, vy: -2 + k * 0.8,
+          bounces: 0, maxBounces: 30, r: 14, life: 9999, rot: 0
         });
       }
       boss.pattern = 'dragon_fireball_active';
@@ -2283,9 +2390,8 @@ function updateDragonBoss(dt) {
   }
   if (boss.pattern === 'dragon_fireball_active') {
     boss.phaseTimer--;
-    if (boss.phaseTimer <= 0 || boss.dragonFireballs.length === 0) {
-      boss.dragonFireballs = [];
-      endDragonPattern(110 + Math.random() * 60);
+    if (boss.phaseTimer <= 0) {
+      endDragonPattern(80 + Math.random() * 60);
     }
   }
 
@@ -2323,7 +2429,7 @@ function updateDragonBoss(dt) {
 
     if (boss.phase === 0 && boss.phaseTimer <= 0) {
       // 경고 → 실제 물기
-      boss.biteBoxes.push({ x: boss.biteTargetX - 32, y: FLOOR_Y - 110, w: 64, h: 110, life: 12 });
+      boss.biteBoxes.push({ x: boss.biteTargetX - 160, y: FLOOR_Y - 550, w: 320, h: 550, life: 12 });
       spawnParticles(boss.biteTargetX, FLOOR_Y - 55, '#f80', 16, 6, 22);
       spawnParticles(boss.biteTargetX, FLOOR_Y - 55, '#f40', 8, 4, 16);
       screenFlash = { color: '#f40', alpha: 0.2 };
@@ -2377,6 +2483,309 @@ function endDragonPattern(nextTimer) {
   boss.patternTimer = easyMode ? nextTimer + 70 : nextTimer;
   boss.attackBox = null;
   boss.biteBoxes = [];
+}
+
+// ══════════════════════════════════════════
+//  드래곤 2페이즈 (세 개의 머리)
+// ══════════════════════════════════════════
+const D2_HEADS_DEF = [
+  { bx: -6, by: 22, angle: -2.8  },
+  { bx: -6, by: 30, angle:  Math.PI },
+  { bx: -6, by: 38, angle:  2.8  },
+];
+const D2_NECK_LEN = 62;
+
+function lerpRGB(r1,g1,b1,r2,g2,b2,t) {
+  return `rgb(${~~(r1+(r2-r1)*t)},${~~(g1+(g2-g1)*t)},${~~(b1+(b2-b1)*t)})`;
+}
+
+function d2WorldHead(idx, growP, lungeExtra) {
+  const o = D2_HEADS_DEF[idx];
+  const grow = Math.min(1, Math.max(0, growP * 3 - idx));
+  const len = (D2_NECK_LEN * grow + (lungeExtra || 0)) * 3.5;
+  const lunge = boss.lungeData;
+  const angle = (lunge && lunge.headIdx === idx && lunge.targetDir !== undefined) ? lunge.targetDir : o.angle;
+  return {
+    x: boss.x + o.bx * 3.5 + Math.cos(angle) * len,
+    y: boss.y + o.by * 3.5 + Math.sin(angle) * len
+  };
+}
+
+function drawD2Head(nx0, ny0, angle, neckLen, eyeGlow, jawOpen, wp, hc) {
+  const bc = hc ? '#ff8888' : lerpRGB(178,34,34,220,220,220,wp);
+  const dc = hc ? '#ff6666' : lerpRGB(139,0,0,180,180,180,wp);
+  const sc = hc ? '#ff6666' : lerpRGB(106,0,0,150,150,150,wp);
+  ctx.strokeStyle = bc; ctx.lineWidth = 10; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(nx0,ny0); ctx.lineTo(nx0+Math.cos(angle)*neckLen, ny0+Math.sin(angle)*neckLen); ctx.stroke();
+  ctx.fillStyle = sc;
+  for (let s=6; s<neckLen-10; s+=9) ctx.fillRect(nx0+Math.cos(angle)*s-3, ny0+Math.sin(angle)*s-3, 6, 5);
+  ctx.save();
+  ctx.translate(nx0+Math.cos(angle)*neckLen, ny0+Math.sin(angle)*neckLen);
+  ctx.rotate(angle + Math.PI);
+  ctx.fillStyle=bc; ctx.fillRect(-46,14,44,38);
+  ctx.fillStyle=dc; ctx.fillRect(-44,16,40,32);
+  ctx.fillStyle=sc; ctx.fillRect(-40,4,6,14); ctx.fillRect(-28,2,6,18);
+  ctx.fillStyle='#222'; ctx.fillRect(-40,2,4,4); ctx.fillRect(-28,0,4,4);
+  ctx.fillStyle=eyeGlow?'#fff700':(hc?'#fff':'#FFD700');
+  ctx.fillRect(-40,20,12,9); ctx.fillStyle='#000'; ctx.fillRect(-38,22,8,5);
+  if (eyeGlow) { ctx.fillStyle='rgba(255,220,0,0.65)'; ctx.fillRect(-44,16,20,16); }
+  ctx.fillStyle=bc; ctx.fillRect(-62,22,20,16);
+  ctx.fillStyle=dc; ctx.fillRect(-60,24,16,12);
+  ctx.fillStyle=sc; ctx.fillRect(-62,38+jawOpen,20,12);
+  ctx.fillStyle='#ddd';
+  for (let i=0;i<4;i++) { ctx.fillRect(-60+i*5,36,3,6); ctx.fillRect(-59+i*5,38+jawOpen,3,6); }
+  ctx.restore();
+}
+
+function drawDragonP2() {
+  const whiteP = boss.dragon2WhiteP, growP = boss.dragon2GrowP;
+  ctx.save();
+  ctx.translate(boss.x, boss.y); ctx.scale(3.5, 3.5);
+  const hc = boss.hitFlash > 0;
+  const breathe = Math.sin(boss.animFrame * 0.12) * 2;
+  const bc = hc?'#ff8888':lerpRGB(178,34,34,220,220,220,whiteP);
+  const dc = hc?'#ff6666':lerpRGB(139,0,0,180,180,180,whiteP);
+  const wc = hc?'#ffaaaa':lerpRGB(106,0,0,165,165,165,whiteP);
+
+  // 날개
+  ctx.fillStyle=wc;
+  ctx.beginPath();ctx.moveTo(25,12+breathe);ctx.lineTo(85,-52);ctx.lineTo(90,5);ctx.lineTo(55,28);ctx.closePath();ctx.fill();
+  ctx.fillStyle=dc;
+  ctx.beginPath();ctx.moveTo(50,30);ctx.lineTo(90,-8);ctx.lineTo(90,38);ctx.lineTo(68,48);ctx.closePath();ctx.fill();
+  ctx.fillStyle=lerpRGB(58,0,0,120,120,120,whiteP);
+  ctx.fillRect(22,10,4,52);ctx.fillRect(50,-54,4,28);ctx.fillRect(68,-34,4,22);
+
+  // 몸통
+  ctx.fillStyle=bc;ctx.fillRect(8,28+breathe,76,52);
+  ctx.fillStyle=dc;
+  for (let r=0;r<3;r++) for (let c=0;c<4;c++) ctx.fillRect(12+c*18,32+r*14+breathe,14,10);
+  ctx.fillStyle=hc?'#ffcccc':lerpRGB(204,68,68,215,215,215,whiteP);
+  ctx.fillRect(18,42+breathe,46,28);
+
+  // 꼬리
+  ctx.fillStyle=bc;ctx.fillRect(80,50,12,18);ctx.fillRect(88,60,10,12);ctx.fillRect(94,68,8,8);
+
+  // 다리
+  ctx.fillStyle=dc;ctx.fillRect(18,76+breathe,14,22);ctx.fillRect(58,80+breathe,14,18);
+  ctx.fillStyle='#2a2a2a';
+  ctx.fillRect(14,96,6,6);ctx.fillRect(20,97,6,6);ctx.fillRect(26,96,6,6);
+  ctx.fillRect(54,96,6,6);ctx.fillRect(60,97,6,6);ctx.fillRect(66,96,6,6);
+
+  // 목 그루터기
+  ctx.fillStyle=hc?'#ff6666':lerpRGB(139,0,0,175,175,175,whiteP);
+  ctx.fillRect(-12,18+breathe,24,20);
+
+  // 머리 3개 성장
+  const lunge = boss.lungeData, laserWarn = boss.d2LaserWarning;
+  for (let i=0; i<3; i++) {
+    const hGrow = Math.min(1, Math.max(0, growP * 3 - i));
+    if (hGrow <= 0) continue;
+    let lungeBonus = 0;
+    if (lunge && lunge.headIdx === i) lungeBonus = lunge.progress * 80;
+    const headAngle = (lunge && lunge.headIdx === i && lunge.targetDir !== undefined) ? lunge.targetDir : D2_HEADS_DEF[i].angle;
+    const eyeGlow = (laserWarn && laserWarn.headIdx === i) || (lunge && lunge.headIdx === i && (lunge.phase === 'extend' || lunge.phase === 'hold'));
+    drawD2Head(D2_HEADS_DEF[i].bx, D2_HEADS_DEF[i].by, headAngle, D2_NECK_LEN * hGrow + lungeBonus, eyeGlow, eyeGlow ? 10 : 2, whiteP, hc);
+  }
+  ctx.restore();
+
+  // 경고: 레이저 예고선
+  if (boss.d2LaserWarning) {
+    const wIdx = boss.d2LaserWarning.headIdx;
+    const tip = d2WorldHead(wIdx, growP, 0);
+    const prog = 1 - boss.d2LaserWarning.life / 24;
+    const pulse = 0.4 + 0.4 * Math.sin(Date.now() * 0.018);
+    ctx.save();
+    ctx.globalAlpha = prog * 0.7 * pulse;
+    ctx.strokeStyle = '#ffe000'; ctx.lineWidth = 3;
+    ctx.setLineDash([12, 8]);
+    ctx.beginPath(); ctx.moveTo(tip.x, tip.y);
+    ctx.lineTo(player.x + player.w/2, player.y + player.h/2); ctx.stroke();
+    ctx.setLineDash([]); ctx.restore();
+  }
+  // 경고: 돌진 타겟
+  if (boss.lungeData && boss.lungeData.phase === 'windup') {
+    const pcx = player.x + player.w/2, pcy = player.y + player.h/2;
+    const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.022);
+    ctx.save();
+    ctx.globalAlpha = 0.75 * pulse;
+    ctx.strokeStyle = '#f80'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(pcx, pcy, 28 + pulse*12, 0, Math.PI*2); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,100,0,0.18)';
+    ctx.beginPath(); ctx.arc(pcx, pcy, 28 + pulse*12, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+  // 레이저 빔 (월드 좌표)
+  for (const beam of boss.d2LaserBeams) {
+    const tip = d2WorldHead(beam.headIdx, growP, 0);
+    const a = beam.life / beam.maxLife;
+    ctx.save(); ctx.globalAlpha = a;
+    ctx.strokeStyle = '#fff700'; ctx.lineWidth = 3 + (1-a)*10;
+    ctx.shadowColor = '#ffff00'; ctx.shadowBlur = 16;
+    ctx.beginPath(); ctx.moveTo(tip.x, tip.y); ctx.lineTo(beam.ex, beam.ey); ctx.stroke();
+    ctx.restore();
+  }
+
+  // 불기둥
+  for (const p of boss.d2FirePillars) {
+    if (p.warning) {
+      const a = Math.min(0.75, (p.warnMaxLife - p.warnLife) / (p.warnMaxLife * 0.5) * 0.75);
+      ctx.fillStyle = `rgba(255,60,0,${a*0.35})`; ctx.fillRect(p.x-40,0,80,FLOOR_Y);
+      ctx.fillStyle = `rgba(255,150,0,${a*0.8})`; ctx.fillRect(p.x-5,0,10,FLOOR_Y);
+      ctx.fillStyle = `rgba(255,220,80,${a})`; ctx.fillRect(p.x-2,0,4,FLOOR_Y);
+    } else {
+      const a = p.strikeLife / p.strikeMaxLife;
+      const grd = ctx.createLinearGradient(p.x-40,0,p.x+40,0);
+      grd.addColorStop(0, `rgba(255,200,50,${a*0.2})`);
+      grd.addColorStop(0.4, `rgba(255,120,0,${a*0.9})`);
+      grd.addColorStop(0.5, `rgba(255,255,150,${a})`);
+      grd.addColorStop(0.6, `rgba(255,120,0,${a*0.9})`);
+      grd.addColorStop(1, `rgba(255,200,50,${a*0.2})`);
+      ctx.fillStyle = grd; ctx.fillRect(p.x-40,0,80,FLOOR_Y);
+    }
+  }
+
+  // 변신 오버레이
+  if (boss.dragon2State === 'transform' && boss.dragon2Timer < 80) {
+    ctx.fillStyle = `rgba(160,0,0,${(80-boss.dragon2Timer)/80*0.4})`;
+    ctx.fillRect(0,0,1280,720);
+  }
+}
+
+function startD2FirePillar() {
+  boss.d2Pattern = 'd2_firepillar';
+  boss.d2PillarCount = 0; boss.d2PillarNextTimer = 50;
+  boss.d2PatternTimer = 99999;
+}
+function startD2Laser() {
+  boss.d2Pattern = 'd2_laser';
+  boss.d2LaserCount = 0; boss.d2LaserNextTimer = 60; boss.d2LaserWarning = null;
+  boss.d2PatternTimer = 99999;
+}
+function startD2Lunge() {
+  boss.d2Pattern = 'd2_lunge';
+  boss.lungeData = { headIdx: Math.floor(Math.random()*3), phase: 'windup', progress: 0, timer: 55, targetDir: undefined };
+  boss.d2PatternTimer = 99999;
+  sndDragonRoar();
+}
+function endD2Pattern(nt) {
+  boss.d2Pattern = 'idle'; boss.d2PatternTimer = nt;
+  boss.lungeData = null;
+}
+
+function updateDragonP2() {
+  boss.animTimer++;
+  if (boss.animTimer > 12) { boss.animTimer = 0; boss.animFrame++; }
+  if (boss.hitFlash > 0) boss.hitFlash--;
+
+  // 변신 단계
+  if (boss.dragon2State === 'transform') {
+    boss.dragon2Timer++;
+    const t = boss.dragon2Timer;
+    boss.dragon2WhiteP = Math.min(1, t / 200);
+    boss.dragon2GrowP  = Math.min(1, Math.max(0, (t - 60) / 140));
+    if (t % 5 === 0) {
+      spawnParticles(boss.x - 40, boss.y + 65, '#600', 4, 3, 22);
+      spawnParticles(boss.x - 40, boss.y + 65, '#f00', 2, 2, 14);
+    }
+    if (t > 240) {
+      boss.dragon2State = 'active';
+      boss.hp = 30; boss.maxHp = 30; boss.vulnerable = 0;
+      boss.dragon2Timer = 0;
+      boss.d2Pattern = 'idle'; boss.d2PatternTimer = 180;
+      screenFlash = { color: '#fff', alpha: 1 };
+      screenShake = { power: 22, dur: 35 };
+      sndDragonRoar();
+    }
+    return;
+  }
+  if (boss.dragon2State !== 'active') return;
+
+  boss.dragon2Timer++;
+  boss.d2PatternTimer--;
+  if (boss.d2PatternTimer <= 0 && boss.d2Pattern === 'idle') {
+    const r = Math.random();
+    if (r < 0.34) startD2FirePillar();
+    else if (r < 0.67) startD2Laser();
+    else startD2Lunge();
+  }
+
+  // 불기둥 패턴
+  if (boss.d2Pattern === 'd2_firepillar') {
+    boss.d2PillarNextTimer--;
+    for (let i = boss.d2FirePillars.length-1; i >= 0; i--) {
+      const p = boss.d2FirePillars[i];
+      if (p.warning) {
+        p.warnLife--;
+        if (p.warnLife <= 0) {
+          p.warning = false; p.strikeMaxLife = 14; p.strikeLife = 14;
+          spawnParticles(p.x, FLOOR_Y-80, '#ff8', 20, 8, 28);
+          spawnParticles(p.x, FLOOR_Y-80, '#f80', 14, 5, 20);
+          screenShake = { power: 8, dur: 10 };
+          sndDragonSlam();
+        }
+      } else {
+        p.strikeLife--;
+        if (p.strikeLife <= 0) boss.d2FirePillars.splice(i, 1);
+      }
+    }
+    if (boss.d2PillarNextTimer <= 0 && boss.d2PillarCount < 5) {
+      const px = ARENA_LEFT + 80 + Math.random() * (ARENA_RIGHT - ARENA_LEFT - 160);
+      boss.d2FirePillars.push({ x: px, warning: true, warnMaxLife: 60, warnLife: 60 });
+      boss.d2PillarCount++;
+      boss.d2PillarNextTimer = 55;
+    }
+    if (boss.d2PillarCount >= 5 && boss.d2FirePillars.length === 0) endD2Pattern(100 + Math.random()*60);
+  }
+
+  // 레이저 패턴
+  if (boss.d2Pattern === 'd2_laser') {
+    boss.d2LaserNextTimer--;
+    for (let i = boss.d2LaserBeams.length-1; i >= 0; i--) {
+      boss.d2LaserBeams[i].life--;
+      if (boss.d2LaserBeams[i].life <= 0) boss.d2LaserBeams.splice(i, 1);
+    }
+    if (boss.d2LaserWarning) {
+      boss.d2LaserWarning.life--;
+      if (boss.d2LaserWarning.life <= 0) {
+        const wi = boss.d2LaserWarning.headIdx;
+        const tip = d2WorldHead(wi, boss.dragon2GrowP, 0);
+        const dx = (player.x+player.w/2) - tip.x, dy = (player.y+player.h/2) - tip.y;
+        const dist = Math.sqrt(dx*dx+dy*dy) || 1;
+        const angle = Math.atan2(dy, dx);
+        boss.d2LaserBeams.push({ headIdx: wi, life: 22, maxLife: 22, angle, sx: tip.x, sy: tip.y, ex: tip.x+(dx/dist)*1100, ey: tip.y+(dy/dist)*1100 });
+        spawnParticles(tip.x, tip.y, '#fff700', 14, 5, 20);
+        boss.d2LaserWarning = null; boss.d2LaserCount++; boss.d2LaserNextTimer = 50;
+        sndDragonFire();
+      }
+    }
+    if (!boss.d2LaserWarning && boss.d2LaserNextTimer <= 0 && boss.d2LaserCount < 5) {
+      boss.d2LaserWarning = { headIdx: Math.floor(Math.random()*3), life: 50 };
+    }
+    if (boss.d2LaserCount >= 5 && boss.d2LaserBeams.length === 0 && !boss.d2LaserWarning) endD2Pattern(100 + Math.random()*60);
+  }
+
+  // 돌진 패턴
+  if (boss.d2Pattern === 'd2_lunge') {
+    const l = boss.lungeData;
+    if (!l) { endD2Pattern(60); return; }
+    l.timer--;
+    if (l.phase === 'windup') {
+      if (l.timer <= 0) {
+        l.phase = 'extend'; l.timer = 22;
+        const tip0 = d2WorldHead(l.headIdx, boss.dragon2GrowP, 0);
+        l.targetDir = Math.atan2((player.y+player.h/2)-tip0.y, (player.x+player.w/2)-tip0.x);
+        spawnParticles(tip0.x, tip0.y, '#f80', 8, 4, 16);
+      }
+    } else if (l.phase === 'extend') {
+      l.progress = 1 - (l.timer / 22);
+      if (l.timer <= 0) { l.phase = 'hold'; l.progress = 1; l.timer = 18; }
+    } else if (l.phase === 'hold') {
+      if (l.timer <= 0) { l.phase = 'retract'; l.timer = 30; }
+    } else if (l.phase === 'retract') {
+      l.progress = l.timer / 30;
+      if (l.timer <= 0) { boss.lungeData = null; endD2Pattern(100 + Math.random()*60); }
+    }
+  }
 }
 
 function startP2Dash() {
@@ -2527,10 +2936,15 @@ function updateProjectiles(dt) {
       spawnParticles(ARENA_RIGHT - 10, fb.y, '#f80', 8, 4, 20);
       spawnParticles(ARENA_RIGHT - 10, fb.y, '#f40', 5, 3, 14);
     }
-    // 바닥 튕기기 (약한)
+    // 바닥 튕기기
     if (fb.y + fb.r > FLOOR_Y - 22) {
-      fb.vy = -Math.abs(fb.vy) * 0.9 - 2;
+      fb.vy = -Math.abs(fb.vy) * 0.85;
       fb.y = FLOOR_Y - 22 - fb.r;
+    }
+    // 천장 튕기기
+    if (fb.y - fb.r < 20 && fb.vy < 0) {
+      fb.vy = Math.abs(fb.vy) * 0.85;
+      fb.y = 20 + fb.r;
     }
     fb.life--;
     if (fb.life <= 0 || fb.bounces >= fb.maxBounces) {
@@ -2546,6 +2960,10 @@ function checkCollisions() {
   if (player.attackHitbox) {
     const a = player.attackHitbox;
     if (rectsOverlap(a, boss)) {
+      if (boss.vulnerable <= 0) {
+        spawnParticles(a.x + 10, a.y + 17, '#888', 6, 3, 10);
+        player.attackHitbox = null;
+      } else {
       boss.hp -= a.dmg;
       boss.hitFlash = 12;
       if (selectedWeapon !== 'dagger') boss.stagger = 8;
@@ -2566,6 +2984,7 @@ function checkCollisions() {
       }
 
       player.attackHitbox = null;
+      } // end vulnerable check
     }
   }
 
@@ -2576,7 +2995,7 @@ function checkCollisions() {
         // 점프로 회피
       } else if (player.parryActive || cheatAutoParry) {
         doParry(boss.attackBox.x + 20, boss.attackBox.y);
-        if (boss.attackBox.type !== 'slam') boss.attackBox = null;
+        boss.attackBox = null;
       } else {
         damagePlayer();
         if (boss.attackBox.type !== 'slam') boss.attackBox = null;
@@ -2662,13 +3081,65 @@ function checkCollisions() {
     const a = player.arrows[i];
     const ar = { x: a.x - 10, y: a.y - 5, w: 20, h: 10 };
     if (!boss.dead && rectsOverlap(ar, boss)) {
-      boss.hp -= a.dmg;
-      boss.hitFlash = 10;
-      boss.stagger = a.stagger;
-      spawnParticles(a.x, a.y, '#ff8', 5, 3, 12);
-      if (a.homing) spawnParticles(a.x, a.y, '#4f8', 4, 3, 12);
-      player.arrows.splice(i, 1);
-      sndArrowHit();
+      if (boss.vulnerable <= 0) {
+        spawnParticles(a.x, a.y, '#888', 4, 3, 10);
+        player.arrows.splice(i, 1);
+      } else {
+        boss.hp -= a.dmg;
+        boss.hitFlash = 10;
+        boss.stagger = a.stagger;
+        spawnParticles(a.x, a.y, '#ff8', 5, 3, 12);
+        if (a.homing) spawnParticles(a.x, a.y, '#4f8', 4, 3, 12);
+        player.arrows.splice(i, 1);
+        sndArrowHit();
+      }
+    }
+  }
+
+  // 드래곤 2페이즈 충돌
+  if (selectedBoss === 'dragon' && boss.dragon2Active && boss.dragon2State === 'active') {
+    const pr = getPlayerRect();
+
+    // 불기둥 → 플레이어
+    for (const p of boss.d2FirePillars) {
+      if (!p.warning && p.strikeLife > 0 && !p.hit) {
+        const pillarR = { x: p.x-40, y: 0, w: 80, h: FLOOR_Y };
+        if (rectsOverlap(pillarR, pr)) {
+          p.hit = true;
+          if (player.parryActive || cheatAutoParry) { doParry(p.x, FLOOR_Y/2); }
+          else { damagePlayer(); }
+        }
+      }
+    }
+
+    // 레이저 빔 → 플레이어
+    for (let i = boss.d2LaserBeams.length-1; i >= 0; i--) {
+      const beam = boss.d2LaserBeams[i];
+      const pcx = pr.x + pr.w/2, pcy = pr.y + pr.h/2;
+      const pdx = pcx - beam.sx, pdy = pcy - beam.sy;
+      const dot = pdx*Math.cos(beam.angle) + pdy*Math.sin(beam.angle);
+      const cross = Math.abs(-pdx*Math.sin(beam.angle) + pdy*Math.cos(beam.angle));
+      if (dot > 0 && dot < 1100 && cross < 32) {
+        if (player.parryActive || cheatAutoParry) { doParry(pcx, pcy); boss.d2LaserBeams.splice(i, 1); }
+        else { damagePlayer(); boss.d2LaserBeams.splice(i, 1); }
+        break;
+      }
+    }
+
+    // 머리 돌진 → 플레이어
+    const l = boss.lungeData;
+    if (l && (l.phase === 'extend' || l.phase === 'hold')) {
+      const tip = d2WorldHead(l.headIdx, boss.dragon2GrowP, l.progress * 80);
+      const headHB = { x: tip.x-52, y: tip.y-52, w: 104, h: 104 };
+      if (rectsOverlap(headHB, pr)) {
+        if (player.parryActive || cheatAutoParry) {
+          doParry(tip.x, tip.y);
+          l.phase = 'retract'; l.timer = 22; l.progress = 1;
+        } else {
+          damagePlayer();
+          l.phase = 'retract'; l.timer = 22; l.progress = 1;
+        }
+      }
     }
   }
 }
@@ -2684,7 +3155,7 @@ function rectsOverlap(a, b) {
 }
 
 function damagePlayer() {
-  if (player.invincible > 100) return;
+  if (player.invincible > 0) return;
   player.hp--;
   player.hitFlash = 20;
   player.invincible = 90;
@@ -2697,6 +3168,7 @@ function doParry(px, py) {
   boss.hp -= 1;
   boss.stagger = 40;
   boss.hitFlash = 20;
+  boss.vulnerable = 600;
   screenFlash = { color: '#fff', alpha: 0.7 };
   screenShake = { power: 10, dur: 16 };
   spawnParticles(px, py, '#fff', 16, 6, 20);
@@ -2798,7 +3270,11 @@ function drawBattle() {
 
   // 보스
   if (selectedBoss === 'dragon') {
-    drawDragon(boss.x, boss.y, boss.hitFlash, boss.pattern, boss.animFrame, boss.phaseTimer, boss.biteStep);
+    if (boss.dragon2Active) {
+      drawDragonP2();
+    } else {
+      drawDragon(boss.x, boss.y, boss.hitFlash, boss.pattern, boss.animFrame, boss.phaseTimer, boss.biteStep);
+    }
   } else {
     drawBoss(boss.x, boss.y, boss.facing, boss.animFrame, boss.stagger, boss.hitFlash, boss.pattern, boss.deathAnim, boss.isPhase2);
   }
@@ -2935,8 +3411,8 @@ function handleClick(mx, my) {
       bossSelectScroll = 0;
       sndMenuClick();
     }
-    // 붉은 비룡 (어려움 모드 시 잠김)
-    if (!hardMode && mx > cx2 && mx < cx2+cardW && amy > cy && amy < cy+cardH) {
+    // 붉은 비룡
+    if (mx > cx2 && mx < cx2+cardW && amy > cy && amy < cy+cardH) {
       selectedBoss = 'dragon';
       state = STATE.WEAPON_SELECT;
       bossSelectScroll = 0;
@@ -3069,6 +3545,9 @@ function loop(ts) {
   }
 
   ctx.restore(); // 화면 흔들림 해제
+
+  // 모바일 가상 버튼 (흔들림 영향 없게 restore 후에 그림)
+  if (state === STATE.BATTLE) drawVirtualButtons();
 
   // 클릭 처리 (leftJustPressed)
   if (mouse.leftJustPressed) {
